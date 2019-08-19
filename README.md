@@ -14,6 +14,6 @@ Add parameter -x (cannot be done at the same time as -d) to actually synchronise
 ## rmdiff
 (Remote diff) Run rmdiff <path-to-local-file> and it’ll show you a diff between the local and remote files. Add -e : rmdiff -e <path-to-local-file> to open the files up in vimdiff for inspection
 
-##rmget
+## rmget
 Gets the remote version of a file to replace the local
 

@@ -1,0 +1,198 @@
+#!/bin/sh
+
+# Project synchronisation script
+# (c) Stephan Nedregaard 2012-
+#
+# Use freely, but at own responsibility
+
+DIR=`pwd`
+
+while [[ ! -e $DIR/project.cfg ]]; do
+	DIR=$(dirname $DIR)
+	if [[ $DIR == "/" ]]; then
+		echo "No project configuration found"
+		exit 1
+	fi
+done
+
+source $DIR/project.cfg
+SRC_DIR=$(dirname $DIR)
+
+OPTS="-avz --delete --exclude project.cfg "
+
+for i in $EXCLUDE; do
+	OPTS="$OPTS --exclude '$i'"
+done
+
+# -d : Show diffs between remote and local
+# -s : (with -d) : Show summary diffs only (i.e. changed or not, not actual changes)
+# -e : (with -d) : Excludes a pattern from diffs, useful when you have a vendor module you don't want to include in the diff
+# -x : Execute -- actually synchronises rather than showing the potentially synchronised files
+
+#echo $OPTS
+dryrun=1
+diff=0
+summary=0
+reverse=0
+exclude=""
+verbose=0
+modules="$MODS"
+module_filter=""
+
+while getopts ":xvdrsm:e:" i; do
+    case $i in
+        x ) dryrun=0
+			;;
+		d) diff=1
+			;;
+		s) summary=1
+			;;
+		v) verbose=1
+			;;
+		e) OPTS="$OPTS --exclude \"$OPTARG\""
+			;;
+		m) module_filter=$OPTARG;
+			;;
+		r) reverse=1
+			;;
+		*) echo "Invalid option $i"
+			;;
+    esac
+done
+
+XOPTS=""
+
+if [ $dryrun -gt 0 ]; then
+    XOPTS="-n";
+fi
+
+if [[ $module_filter != "" ]]; then
+	ok=0
+	for f in $module_filter; do
+		for i in $modules; do
+			if [[ $i == $f ]]; then
+				ok=1
+			fi
+		done
+		if [[ $ok == 0 ]]; then
+			echo "Unrecognised module: $f ; available modules: $modules"
+			exit;
+		fi
+	done
+fi
+
+COL_RED="\033[0;31m"
+COL_GREEN="\033[0;32m"
+COL_YELLOW="\033[0;33m"
+COL_NONE="\033[0m"
+
+if [[ $DEST_DIR == "" ]]; then
+	DEST_DIR="/home/$user/src"
+fi
+
+if [[ $SRC_DIR == "" ]]; then
+	SRC_DIR="$HOME/src"
+fi
+
+function diff_files {
+	h=$1
+	i=$2
+	dest=$3
+	exclude=$4
+	if [[ $i != $dest ]]; then
+		echo "Diff does not support different source and dest directories yet"
+		exit
+	fi
+	if [[ $exclude == "" ]]; then
+		diffout=`bash -c "/usr/bin/rsync $XOPTS $OPTS $SRC_DIR/$i $user@$h:$DEST_DIR" | grep "^$i"`;
+	else
+		echo bash -c "/usr/bin/rsync $XOPTS $OPTS $SRC_DIR/$i $user@$h:$DEST_DIR" | grep "^$i" | grep -v "$exclude"
+		diffout=`bash -c "/usr/bin/rsync $XOPTS $OPTS $SRC_DIR/$i $user@$h:$DEST_DIR" | grep "^$i" | grep -v "$exclude"`;
+	fi
+	for file in $diffout; do
+		# Skip directories, these will be mode changes or will have files in them (or will be empty)
+		if [[ -d $SRC_DIR/$file ]]; then
+			continue;
+		fi;
+		#echo $file
+		# Get a local copy of remote version for diff
+		rm /tmp/tmpdiff &>/dev/null
+		scp $user@$h:$DEST_DIR/$file /tmp/tmpdiff &>/dev/null
+		if [[ ! -e /tmp/tmpdiff ]]; then
+			echo "${COL_GREEN}+${COL_NONE} $file : Added"
+			continue
+		fi
+		difftxt=`diff -w $SRC_DIR/$file /tmp/tmpdiff`;
+		basename=`basename /$file`;
+		if [[ $difftxt == "" ]]; then
+			continue;
+		fi
+		if [[ $difftxt == $basename ]]; then
+			echo "(NEW)";
+			continue;
+		fi
+		if [[ $summary -gt 0 ]]; then
+			echo "${COL_GREEN}*${COL_NONE} $file : Changed"
+		else
+			echo "${COL_GREEN}*${COL_NONE} $file"
+			echo diff $SRC_DIR/$file /tmp/tmpdiff;
+			diff $SRC_DIR/$file /tmp/tmpdiff;
+			echo 
+		fi
+
+	done
+}
+
+for h in $WWW_HOSTS; do
+	mod_in=($modules)
+	if [[ $REMOTE_MODS == "" ]]; then 
+		mod_out=($modules)
+	else
+		mod_out=($REMOTE_MODS)
+	fi
+	len=${#mod_in[@]}
+	for (( c=0; c<$len; c++ )); do
+		i=${mod_in[$c]}
+		dest=${mod_out[$c]}
+
+		if [[ $module_filter != "" ]]; then
+			ok=0
+			for f in $module_filter; do
+				if [[ $i == $f ]]; then
+					ok=1
+				fi
+			done
+			if [[ $ok == 0 ]]; then
+				continue;
+			fi
+		fi
+		echo "${COL_YELLOW}=== [$h] $i ===${COL_NONE}"
+
+
+		if [[ $diff -gt 0 ]]; then
+			diff_files $h $i $dest $exclude
+		else
+			# Non-diff
+			if [[ $reverse -gt 0 ]]; then
+				if [[ $verbose -gt 0 ]]; then
+					echo bash -c "/usr/bin/rsync $XOPTS $OPTS $user@$h:$DEST_DIR/$dest/ $SRC_DIR/$i/"
+				fi
+				bash -c "/usr/bin/rsync $XOPTS $OPTS $user@$h:$DEST_DIR/$dest/ $SRC_DIR/$i/"
+			else
+				if [[ $i == $dest ]]; then
+					if [[ $verbose -gt 0 ]]; then
+						echo Running rsync
+					fi
+					bash -c "/usr/bin/rsync $XOPTS $OPTS $SRC_DIR/$i $user@$h:$DEST_DIR"
+				else
+					if [[ $verbose -gt 0 ]]; then
+						echo bash -c "/usr/bin/rsync $XOPTS $OPTS $SRC_DIR/$i/ $user@$h:$DEST_DIR/$dest/"
+					fi
+					bash -c "/usr/bin/rsync $XOPTS $OPTS $SRC_DIR/$i/ $user@$h:$DEST_DIR/$dest/"
+				fi
+			fi
+		fi
+	done
+done;
+
+

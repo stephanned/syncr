@@ -1,0 +1,82 @@
+#!/bin/bash
+
+# Project synchronisation script: remote file getter
+# (c) Stephan Nedregaard 2012-
+#
+# Use freely, but at own responsibility
+
+host="";
+user="root";
+sources=();
+
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
+host="auto"
+user="syncr"
+
+while [[ $# > 0 ]]; do
+
+	key="$1";
+
+	case $key in 
+		-h|--host)
+			host="$2";
+			shift;
+			;;
+		-u|--user)
+			user="$2";
+			shift;
+			;;
+		*)
+			sources+=($1);
+			;;
+	esac
+	shift;
+done;
+
+if [[ $host == "" ]]; then
+	echo No host specified. Add a -h parameter, e.g. -h myhost.mydomain.tld
+	exit
+fi
+
+for source in "${sources[@]}"; do
+	pathlcl=`realpath $source`;
+	if [[ $pathlcl == "" ]]; then
+		echo "File not found and cannot be created: $source";
+		echo "Aborting";
+		exit;
+	fi;
+	if [[ -d $pathlcl ]]; then
+		continue;
+	fi;
+	lhost="$host"
+
+	if [[ $host == "auto" ]]; then
+		dir=$(dirname $pathlcl)
+		while [[ ! -e $dir/project.cfg ]]; do
+			dir=$(dirname $dir)
+			if [[ $dir == "/" ]]; then
+				echo "No configuration detected for $pathlcl"
+				exit;
+			fi
+		done
+		source $dir/project.cfg
+		SRC_DIR=$(dirname $dir)
+		lhost=$WWW_HOSTS
+	fi
+
+	if [[ $SRC_DIR == "" ]]; then 
+		SRC_DIR="$HOME/src"
+	fi
+	if [[ $DEST_DIR == "" ]]; then
+		DEST_DIR="/home/$user/src"
+	fi
+
+	path=${pathlcl//$SRC_DIR/$DEST_DIR};
+
+	scp $user@$lhost:$path $pathlcl
+done
+
+
